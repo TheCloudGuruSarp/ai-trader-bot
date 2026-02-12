@@ -1,0 +1,118 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+import numpy as np
+import time
+from datetime import datetime
+
+# --- Ayarlar ---
+st.set_page_config(page_title="AI Trader Agent", layout="wide", page_icon="🤖")
+
+# --- Session State (Hafıza - Tarayıcı açık kaldığı sürece tutar) ---
+if 'balance' not in st.session_state:
+    st.session_state.balance = 100.0  # Başlangıç 100$
+if 'btc_held' not in st.session_state:
+    st.session_state.btc_held = 0.0
+if 'history' not in st.session_state:
+    st.session_state.history = []     # İşlem geçmişi
+if 'portfolio_values' not in st.session_state:
+    st.session_state.portfolio_values = [] # Grafik için
+
+# --- Fonksiyonlar ---
+def get_btc_price():
+    # Yahoo Finance'den canlı BTC fiyatı
+    btc = yf.Ticker("BTC-USD")
+    data = btc.history(period="1d", interval="1m")
+    return data['Close'].iloc[-1]
+
+def simulate_ai_decision(price):
+    # BURASI YAPAY ZEKANIN SİMÜLASYONU
+    # Gerçekte buraya OpenAI API bağlanır ve haberleri yorumlar.
+    # Şimdilik: Rastgele ama mantıklı bir karar üretiyor gibi yapalım.
+    decisions = ["AL", "SAT", "BEKLE"]
+    # Biraz kaos ekleyelim, her zaman aynı şeyi demesin
+    decision = np.random.choice(decisions, p=[0.2, 0.2, 0.6]) 
+    
+    reasoning = ""
+    if decision == "AL":
+        reasoning = "AI Analizi: Haber akışı pozitif, RSI aşırı satım bölgesinde. Yükseliş ihtimali %78."
+    elif decision == "SAT":
+        reasoning = "AI Analizi: Balina hareketliliği tespit edildi, ani düşüş riski var. Nakite geçiyorum."
+    else:
+        reasoning = "AI Analizi: Piyasa yatay seyrediyor. Belirsizlik hakim. İşlem yapılmadı."
+    
+    return decision, reasoning
+
+# --- Arayüz (Frontend) ---
+st.title("🤖 AI Agent: 'Para Kazan ya da Öl' Simülasyonu")
+st.markdown("---")
+
+# Yan Panel (Sidebar)
+with st.sidebar:
+    st.header("Cüzdan Durumu")
+    current_price = get_btc_price()
+    total_value = st.session_state.balance + (st.session_state.btc_held * current_price)
+    
+    delta = total_value - 100
+    st.metric(label="Toplam Varlık", value=f"${total_value:.2f}", delta=f"{delta:.2f}$")
+    
+    st.write(f"💵 Nakit: ${st.session_state.balance:.2f}")
+    st.write(f"🪙 BTC Miktar: {st.session_state.btc_held:.6f}")
+    
+    if st.button("AI Ajanını Tetikle (Trade Yap)"):
+        with st.spinner('Piyasa taranıyor, haberler okunuyor...'):
+            time.sleep(1) # Heyecan yaratalım
+            decision, reason = simulate_ai_decision(current_price)
+            
+            # İşlem Mantığı
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            if decision == "AL" and st.session_state.balance > 10:
+                amount_to_buy = st.session_state.balance # Tüm parayı bas (Riskli mod)
+                btc_bought = amount_to_buy / current_price
+                st.session_state.btc_held += btc_bought
+                st.session_state.balance = 0
+                st.success(f"ALIM YAPILDI! {amount_to_buy:.2f}$ değerinde BTC.")
+                
+            elif decision == "SAT" and st.session_state.btc_held > 0:
+                amount_sold = st.session_state.btc_held * current_price
+                st.session_state.balance += amount_sold
+                st.session_state.btc_held = 0
+                st.error(f"SATIŞ YAPILDI! {amount_sold:.2f}$ nakite geçildi.")
+            
+            # Kayıt Tut
+            st.session_state.history.insert(0, {
+                "Zaman": timestamp,
+                "Fiyat": current_price,
+                "Karar": decision,
+                "Neden": reason,
+                "Toplam Varlık": total_value
+            })
+            
+            # Grafik verisi ekle
+            st.session_state.portfolio_values.append({"time": timestamp, "value": total_value})
+
+# Ana Ekran
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("📈 Portföy Değişimi")
+    if st.session_state.portfolio_values:
+        df_chart = pd.DataFrame(st.session_state.portfolio_values)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_chart['time'], y=df_chart['value'], mode='lines+markers', name='Varlık'))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Henüz işlem yapılmadı. Yan panelden ajanı tetikleyin.")
+
+with col2:
+    st.subheader("📜 Son İşlemler & AI Günlüğü")
+    for log in st.session_state.history:
+        color = "green" if log["Karar"] == "AL" else "red" if log["Karar"] == "SAT" else "gray"
+        st.markdown(f"**[{log['Zaman']}]** :{color}[{log['Karar']}] @ ${log['Fiyat']:.2f}")
+        st.caption(f"_{log['Neden']}_")
+        st.divider()
+
+# Otomatik yenileme için not
+st.caption("Not: Bu bir simülasyondur. Gerçek para kullanılmaz. Sayfayı yenilerseniz veriler sıfırlanır (Database yok).")
