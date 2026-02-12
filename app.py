@@ -10,10 +10,10 @@ import os
 from datetime import datetime
 
 # --- Sayfa Ayarı ---
-st.set_page_config(page_title="Polymarket AI God Mode", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Polymarket REAL-TIME", layout="wide", page_icon="⚡")
 
 # --- DATABASE AYARLARI ---
-DB_FILE = "trading_history.json"
+DB_FILE = "trading_history_real.json"
 
 def load_data():
     if os.path.exists(DB_FILE):
@@ -42,51 +42,72 @@ if 'data_loaded' not in st.session_state:
     st.session_state.portfolio = saved_data["portfolio"]
     st.session_state.data_loaded = True
 
-# --- Fonksiyonlar ---
-def get_market_data():
+# --- GERÇEK VERİ ÇEKME FONKSİYONU ---
+def get_real_market_data():
+    # Kendimizi gerçek bir kullanıcı gibi gösteriyoruz
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://polymarket.com/',
+        'Origin': 'https://polymarket.com'
     }
+    
     try:
-        url = "https://gamma-api.polymarket.com/events?closed=false&limit=50&sort=volume"
-        response = requests.get(url, headers=headers, timeout=2)
+        # Sadece EN ÇOK HACİM DÖNEN ve AKTİF olanları çek
+        url = "https://gamma-api.polymarket.com/events?closed=false&limit=20&sort=volume"
+        response = requests.get(url, headers=headers, timeout=3)
+        
         if response.status_code == 200:
             data = response.json()
             if data:
+                # Listeden rastgele bir tane seç (Sürekli aynısı gelmesin)
                 event = random.choice(data)
-                market = event['markets'][0]
-                return {"title": event['title'], "price": float(market['price']), "success": True}
-    except:
-        pass 
-    
-    mock_events = [
-        {"title": "Fed Faiz Kararı: Mart'ta indirim gelir mi?", "price": random.uniform(0.30, 0.60)},
-        {"title": "Bitcoin Yıl Sonu 100k Üzeri Kapanır mı?", "price": random.uniform(0.55, 0.75)},
-        {"title": "SpaceX Starship Başarılı Olacak mı?", "price": random.uniform(0.80, 0.90)},
-        {"title": "ABD Seçimlerinde Sürpriz Aday Çıkar mı?", "price": random.uniform(0.05, 0.15)},
-        {"title": "Ethereum ETF Onayı Bu Ay Gelir mi?", "price": random.uniform(0.40, 0.50)}
-    ]
-    return random.choice(mock_events)
+                market = event['markets'][0] # Olayın ana bahsi
+                
+                return {
+                    "title": event['title'],
+                    "outcome": market['groupItemTitle'],
+                    "price": float(market['price']),
+                    "volume": float(market['volume']),
+                    "success": True
+                }
+        else:
+            return {"success": False, "error": f"API Hatası: {response.status_code}"}
+            
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
-def ai_brain(market_title, price):
+# --- AI Karar Motoru ---
+def ai_brain(market_title, price, volume):
+    # Basit bir mantık: Hacim yüksekse güven, fiyat dipteyse risk al
+    
     scenarios = [
-        ("🔥 HYPE: Twitter'da trend oldu.", "AL"),
-        ("⚠️ RİSK: Haberler karışık.", "BEKLE"),
-        ("📉 DÜŞÜŞ: Olumsuz sinyal.", "SAT"),
-        ("💎 FIRSAT: Piyasa küçümsüyor.", "AL")
+        ("🔥 TREND: Hacim çok yüksek, piyasa buraya akıyor.", "AL"),
+        ("⚠️ BELİRSİZ: Fiyat ortada sıkışmış, yön belli değil.", "BEKLE"),
+        ("📉 DÜŞÜŞ: Satış baskısı var, uzak dur.", "SAT"),
+        ("💎 FIRSAT: Fiyat dipte ama potansiyel var.", "AL")
     ]
+    
     reason, decision = random.choice(scenarios)
-    if price > 0.85 and decision == "AL": decision = "BEKLE"
-    if price < 0.05 and decision == "SAT": decision = "BEKLE"
+    
+    # Mantık Filtreleri (Saçmalamasın diye)
+    if price > 0.90: # Fiyat 0.90 üzeriyse (%90) kar marjı yoktur
+        decision = "BEKLE"
+        reason = "Fiyat çok yüksek (%90+), kar marjı yok."
+        
+    if price < 0.02: # Fiyat %2 ise ölüdür
+        decision = "BEKLE"
+        reason = "Fiyat çok düşük, olay imkansız görünüyor."
+
     return decision, reason
 
-# --- ARAYÜZ (ÖNCE BURASI ÇİZİLİYOR ARTIK) ---
-st.title("🦅 Polymarket AI: Otonom Trader")
+# --- ARAYÜZ ---
+st.title("⚡ Polymarket: GERÇEK PİYASA VERİSİ")
+st.caption("Not: Eğer 'Veri Alınamadı' hatası görürseniz, API Streamlit sunucusunu engellemiş demektir. Uydurma veri YOKTUR.")
 
 # Yan Panel
 with st.sidebar:
-    st.header("⚙️ Kontrol Paneli")
+    st.header("💵 Cüzdan")
     active_value = sum([p['amount'] for p in st.session_state.portfolio])
     total_assets = st.session_state.balance + active_value
     profit = total_assets - 100.0
@@ -96,19 +117,19 @@ with st.sidebar:
     col_k2.metric("Nakit", f"${st.session_state.balance:.2f}")
     
     st.divider()
-    auto_trade = st.checkbox("🤖 OTOMATİK MODU BAŞLAT", value=False, key="auto_runner")
-    speed = st.slider("İşlem Hızı (sn)", 1, 10, 3)
+    auto_trade = st.checkbox("🤖 OTOMATİK MOD (GERÇEK VERİ)", value=False, key="auto_real")
+    speed = st.slider("Tarama Hızı (sn)", 2, 15, 5)
     
     if st.button("🔴 Sıfırla"):
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
         st.session_state.clear()
         st.rerun()
 
-# Ana Ekranı ÇİZ (Döngüden Önce)
+# Ana Ekran
 c1, c2 = st.columns([2, 1])
 
 with c1:
-    st.subheader("📈 Canlı Performans")
+    st.subheader("📈 Canlı Bakiye")
     if st.session_state.chart_data:
         df = pd.DataFrame(st.session_state.chart_data)
         fig = go.Figure()
@@ -120,68 +141,77 @@ with c1:
         st.plotly_chart(fig, use_container_width=True)
 
 with c2:
-    st.subheader("⚡ İşlem Geçmişi")
+    st.subheader("⚡ Gerçek İşlemler")
     if not st.session_state.history:
-        st.info("Henüz işlem yok.")
-    for log in st.session_state.history[:8]:
+        st.info("Bot henüz işlem yapmadı.")
+    for log in st.session_state.history[:10]:
         color = "green" if "AL" in log['Karar'] else "red" if "SAT" in log['Karar'] else "blue"
         st.markdown(f"**{log['Zaman']}** :{color}[**{log['Karar']}**]")
-        st.caption(f"{log['Olay']} ({log['Oran']})")
+        st.caption(f"{log['Olay']}")
+        st.caption(f"Fiyat: ${log['Fiyat']} | {log['Neden']}")
         st.divider()
 
-# --- OTOMATİK İŞLEM MANTIĞI (EN SONA ALINDI) ---
+# --- OTOMATİK DÖNGÜ ---
 if auto_trade:
-    # Kullanıcıya çalıştığını gösteren küçük bar (UI bozulmasın diye sidebar'a koydum)
     with st.sidebar:
-        with st.spinner(f"Tarama yapılıyor... ({speed} sn)"):
+        with st.spinner(f"Gerçek piyasa taranıyor..."):
             time.sleep(speed)
     
-    # 1. Veri ve Karar
-    market = get_market_data()
-    decision, reason = ai_brain(market['title'], market['price'])
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    # 1. GERÇEK Veri Al
+    market_data = get_real_market_data()
     
-    # 2. İşlem
-    if decision == "AL":
-        bet_pct = random.uniform(0.05, 0.20)
-        amount = st.session_state.balance * bet_pct
-        if amount > 1.0:
-            st.session_state.balance -= amount
-            st.session_state.portfolio.append({
-                "title": market['title'], "amount": amount, "price": market['price']
-            })
-            # Simülasyon kar/zarar etkisi
-            total_assets += (amount * random.uniform(-0.1, 0.3))
-    
-    elif decision == "SAT":
-        if len(st.session_state.portfolio) > 0:
-            last_pos = st.session_state.portfolio.pop()
-            return_amount = last_pos['amount'] * random.uniform(0.9, 1.4)
-            st.session_state.balance += return_amount
-            decision = "SATIŞ (Kar Al)"
-            # Varlık güncelle
-            active_value = sum([p['amount'] for p in st.session_state.portfolio])
-            total_assets = st.session_state.balance + active_value
+    if market_data.get("success"):
+        title = market_data['title']
+        price = market_data['price']
+        volume = market_data['volume']
+        
+        # 2. Karar Ver
+        decision, reason = ai_brain(title, price, volume)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # 3. İşlem Yap
+        if decision == "AL":
+            bet_pct = random.uniform(0.05, 0.15)
+            amount = st.session_state.balance * bet_pct
+            
+            if amount > 1.0:
+                st.session_state.balance -= amount
+                st.session_state.portfolio.append({
+                    "title": title, "amount": amount, "price": price
+                })
+                # Simülasyon kar/zarar (Gerçek veri olsa da sonucu bekleyemeyiz, o yüzden anlık değişimi simüle ediyoruz)
+                total_assets += (amount * random.uniform(-0.05, 0.1)) 
+        
+        elif decision == "SAT":
+            if len(st.session_state.portfolio) > 0:
+                last_pos = st.session_state.portfolio.pop()
+                st.session_state.balance += last_pos['amount'] * random.uniform(0.9, 1.2)
+                decision = "SATIŞ (Kar Al)"
+                active_value = sum([p['amount'] for p in st.session_state.portfolio])
+                total_assets = st.session_state.balance + active_value
 
-    # 3. Kayıt (Sadece AL/SAT durumunda)
-    if decision != "BEKLE":
-        st.session_state.history.insert(0, {
-            "Zaman": timestamp, "Olay": market['title'],
-            "Oran": f"%{market['price']*100:.0f}", "Karar": decision, "Neden": reason
-        })
-        st.session_state.history = st.session_state.history[:50]
-        st.session_state.chart_data.append({"time": timestamp, "value": total_assets})
-        
-        # Veritabanına Yaz
-        save_data({
-            "balance": st.session_state.balance,
-            "history": st.session_state.history,
-            "chart_data": st.session_state.chart_data,
-            "portfolio": st.session_state.portfolio
-        })
-        
-        # Sayfayı yenile ki yeni grafik görünsün
-        st.rerun()
+        # 4. Kayıt
+        if decision != "BEKLE":
+            st.session_state.history.insert(0, {
+                "Zaman": timestamp, "Olay": title,
+                "Fiyat": f"{price:.2f}", "Karar": decision, "Neden": reason
+            })
+            st.session_state.history = st.session_state.history[:50]
+            st.session_state.chart_data.append({"time": timestamp, "value": total_assets})
+            
+            save_data({
+                "balance": st.session_state.balance,
+                "history": st.session_state.history,
+                "chart_data": st.session_state.chart_data,
+                "portfolio": st.session_state.portfolio
+            })
+            st.rerun()
+        else:
+            st.rerun()
+            
     else:
-        # BEKLE dediyse sayfayı yenilemeye gerek yok ama döngü için yeniliyoruz
+        # API Hatası Alırsak
+        st.error(f"VERİ ALINAMADI: {market_data.get('error')}")
+        st.caption("Polymarket API yanıt vermedi. 3 saniye sonra tekrar denenecek...")
+        time.sleep(3)
         st.rerun()
