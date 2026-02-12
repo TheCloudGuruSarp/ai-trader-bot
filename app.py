@@ -6,135 +6,143 @@ import numpy as np
 import time
 from datetime import datetime
 
-# --- Ayarlar ---
-st.set_page_config(page_title="AI Trader Agent", layout="wide", page_icon="🤖")
+# --- Sayfa Ayarı ---
+st.set_page_config(page_title="Polymarket AI Hunter", layout="wide", page_icon="🦅")
 
-# --- Session State (Hafıza) ---
+# --- Hafıza (State) ---
 if 'balance' not in st.session_state:
-    st.session_state.balance = 100.0
-if 'btc_held' not in st.session_state:
-    st.session_state.btc_held = 0.0
+    st.session_state.balance = 100.0  # 100 Dolar ile başlıyoruz
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = []   # Aldığımız bahisler
 if 'history' not in st.session_state:
-    st.session_state.history = []
-if 'portfolio_values' not in st.session_state:
-    st.session_state.portfolio_values = []
+    st.session_state.history = []     # Loglar
+if 'chart_data' not in st.session_state:
+    st.session_state.chart_data = [{"time": datetime.now().strftime("%H:%M"), "value": 100.0}]
 
-# --- Fonksiyonlar ---
-def get_btc_price():
+# --- Polymarket'ten Gerçek Veri Çekme ---
+def get_top_market():
     try:
-        # CoinGecko API (Daha stabil ve ücretsizdir)
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-        # Bazı API'ler botsanmasın diye header ister
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
+        # Polymarket'in en çok hacim dönen aktif olaylarını çekiyoruz
+        url = "https://gamma-api.polymarket.com/events?closed=false&limit=5&sort=volume"
+        response = requests.get(url, timeout=5)
+        data = response.json()
         
-        if response.status_code == 200:
-            data = response.json()
-            return float(data['bitcoin']['usd'])
-        else:
-            st.error(f"API Hatası: {response.status_code}")
-            return 0.0
+        # Rastgele bir tanesini seçelim ki hep aynısı gelmesin
+        import random
+        event = random.choice(data)
+        market = event['markets'][0]
+        
+        return {
+            "title": event['title'],            # Örn: "Trump seçimi kazanır mı?"
+            "outcome": market['groupItemTitle'],# Örn: "Yes"
+            "price": float(market['price']),    # Örn: 0.55 (Yani %55)
+            "id": market['id']
+        }
     except Exception as e:
-        st.error(f"Fiyat çekilemedi: {e}")
-        return 0.0
+        return {"title": "Veri Çekilemedi", "outcome": "-", "price": 0.50, "id": "0"}
 
-def simulate_ai_decision(price):
-    # Simülasyon Karar Mekanizması
-    decisions = ["AL", "SAT", "BEKLE"]
-    decision = np.random.choice(decisions, p=[0.3, 0.3, 0.4]) # Biraz aksiyonu arttırdım
+# --- AI Karar Simülasyonu ---
+def analyze_market_with_ai(market_title, current_price):
+    # BURADA SİHİR GERÇEKLEŞİYOR GİBİ YAPACAĞIZ
+    # Normalde burası Google News'e gidip haberi okur.
     
-    reasoning = ""
-    if decision == "AL":
-        reasoning = "AI Analizi: Sosyal medya duyarlılığı pozitif (%85). Kısa vadeli yükseliş trendi başlıyor."
-    elif decision == "SAT":
-        reasoning = "AI Analizi: Direnç noktası aşılamadı. Kar realizasyonu için uygun zaman."
-    else:
-        reasoning = "AI Analizi: Piyasa kararsız. Volatilite düşük, işlem riski yüksek."
+    # Simülasyon: Rastgele bir haber senaryosu uydur
+    scenarios = [
+        ("Breaking News: İçeriden bilgi sızdı, bu olay kesinleşti.", "AL (FIRSAT)"),
+        ("Analiz: Sosyal medya bu konuyu yanlış anlıyor, fiyat şişirilmiş.", "SAT / GİRME"),
+        ("Haber: Resmi açıklama az önce geldi, piyasa ters köşe oldu.", "AL (Tersine Oyna)"),
+        ("Veri: Henüz net bir bilgi yok, risk almaya değmez.", "BEKLE")
+    ]
     
-    return decision, reasoning
+    import random
+    scenario, decision = random.choice(scenarios)
+    
+    # Biraz mantık ekleyelim: Fiyat çok düşükse (0.05) ve AI 'Fırsat' dediyse bu büyük olaydır.
+    return decision, scenario
 
 # --- Arayüz ---
-st.title("🤖 AI Agent: 'Para Kazan ya da Öl' Simülasyonu")
+st.title("🦅 Polymarket AI Agent: 'Haber Avcısı'")
+st.caption("Bu bot, Polymarket'teki olayları tarar, 'haberleri okur' ve arbitraj fırsatı arar.")
 st.markdown("---")
 
-# Fiyatı çek
-current_price = get_btc_price()
+# 1. Piyasa Verisini Getir
+market = get_top_market()
+prob = market['price'] * 100
 
-# Eğer fiyat 0 döndüyse manuel bir fallback fiyat koyalım (Demo bozulmasın diye)
-if current_price == 0:
-    st.warning("Canlı fiyat çekilemedi, demo fiyatı kullanılıyor.")
-    current_price = 96500.00
-
-# Yan Panel
+# Yan Panel (Cüzdan)
 with st.sidebar:
-    st.header("Cüzdan Durumu")
+    st.header("💰 Kasa Yönetimi")
     
-    total_value = st.session_state.balance + (st.session_state.btc_held * current_price)
-    delta = total_value - 100
+    # Portföy Değerini Hesapla (Nakit + Açık Bahislerin Değeri)
+    portfolio_val = 0
+    for item in st.session_state.portfolio:
+        # Basitlik için: Aldığımız fiyatın üzerine rastgele kar/zarar ekleyelim simülasyonda
+        # Gerçekte anlık fiyata bakılır.
+        portfolio_val += item['amount'] 
+        
+    total_assets = st.session_state.balance + portfolio_val
+    profit_loss = total_assets - 100
     
-    st.metric(label="Toplam Varlık", value=f"${total_value:.2f}", delta=f"{delta:.2f}$")
-    
+    st.metric("Toplam Varlık", f"${total_assets:.2f}", f"{profit_loss:.2f}$")
     st.write(f"💵 Nakit: ${st.session_state.balance:.2f}")
-    st.write(f"🪙 BTC Miktar: {st.session_state.btc_held:.6f}")
-    st.write(f"📊 Güncel BTC: ${current_price:,.2f}")
+    st.write(f"📜 Açık Bahisler: {len(st.session_state.portfolio)} Adet")
     
-    st.markdown("---")
-    
-    if st.button("AI Ajanını Tetikle (Trade Yap) 🚀"):
-        with st.spinner('Piyasa taranıyor...'):
-            time.sleep(0.5) 
-            decision, reason = simulate_ai_decision(current_price)
+    st.divider()
+    if st.button("Haberleri Tara ve İşlem Yap 🌍"):
+        with st.spinner(f"'{market['title']}' hakkında haberler taranıyor..."):
+            time.sleep(1.5) # Düşünme payı
+            decision, reason = analyze_market_with_ai(market['title'], market['price'])
+            
             timestamp = datetime.now().strftime("%H:%M:%S")
             
-            # İşlem Mantığı
-            if decision == "AL":
-                if st.session_state.balance > 10:
-                    amount_to_buy = st.session_state.balance 
-                    btc_bought = amount_to_buy / current_price
-                    st.session_state.btc_held += btc_bought
-                    st.session_state.balance = 0
-                    st.success(f"ALIM: {amount_to_buy:.2f}$ -> BTC")
-                else:
-                    st.info("Yetersiz Bakiye (Zaten maldasın)")
-                    decision = "BEKLE (Yetersiz Bakiye)"
+            if "AL" in decision and st.session_state.balance > 10:
+                invest = 10.0 # Her bahse 10 dolar at
+                st.session_state.balance -= invest
+                st.session_state.portfolio.append({
+                    "title": market['title'],
+                    "entry_price": market['price'],
+                    "amount": invest
+                })
+                st.success(f"İŞLEM AÇILDI: {market['title']} üzerine oynandı.")
                 
-            elif decision == "SAT":
-                if st.session_state.btc_held > 0.00001:
-                    amount_sold = st.session_state.btc_held * current_price
-                    st.session_state.balance += amount_sold
-                    st.session_state.btc_held = 0
-                    st.error(f"SATIŞ: BTC -> {amount_sold:.2f}$")
-                else:
-                    st.info("Satacak BTC yok")
-                    decision = "BEKLE (BTC Yok)"
+                # Grafik güncelle
+                st.session_state.chart_data.append({"time": timestamp, "value": total_assets})
+                
+            elif "SAT" in decision:
+                st.warning("Riskli bulundu, pas geçildi.")
+            else:
+                st.info("Yeterli veri yok, bekleniyor.")
             
-            # Kayıt ve Grafik Güncelleme
+            # Log kaydı
             st.session_state.history.insert(0, {
                 "Zaman": timestamp,
-                "Fiyat": current_price,
+                "Olay": market['title'],
+                "Oran": f"%{prob:.1f}",
                 "Karar": decision,
-                "Neden": reason,
-                "Toplam Varlık": total_value
+                "AI Yorumu": reason
             })
-            st.session_state.portfolio_values.append({"time": timestamp, "value": total_value})
 
-# Ana Ekran
-col1, col2 = st.columns([2, 1])
+# Ana Ekran Düzeni
+col1, col2 = st.columns([2,1])
 
 with col1:
-    st.subheader("📈 Portföy Değişimi")
-    if st.session_state.portfolio_values:
-        df_chart = pd.DataFrame(st.session_state.portfolio_values)
+    st.subheader(f"🎯 Hedef Olay: {market['title']}")
+    st.info(f"Piyasa Tahmini: **%{prob:.1f}** ({market['outcome']})")
+    
+    # Grafik
+    st.subheader("📈 Bakiye Büyümesi")
+    if len(st.session_state.chart_data) > 0:
+        df = pd.DataFrame(st.session_state.chart_data)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df_chart['time'], y=df_chart['value'], mode='lines+markers', name='Varlık', line=dict(color='#00CC96')))
+        fig.add_trace(go.Scatter(x=df['time'], y=df['value'], mode='lines+markers', line=dict(color='#00FF00')))
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Henüz işlem yapılmadı. Yan panelden ajanı tetikleyin.")
 
 with col2:
-    st.subheader("📜 AI Günlüğü")
+    st.subheader("⚡ Son Hamleler")
     for log in st.session_state.history:
-        color = "green" if "AL" in log["Karar"] else "red" if "SAT" in log["Karar"] else "gray"
-        st.markdown(f"**{log['Zaman']}** - :{color}[{log['Karar']}]")
-        st.caption(f"_{log['Neden']}_")
+        color = "green" if "AL" in log['Karar'] else "red"
+        st.markdown(f"**{log['Zaman']}** | :{color}[{log['Karar']}]")
+        st.caption(f"{log['Olay']}")
+        st.caption(f"_{log['AI Yorumu']}_")
         st.divider()
