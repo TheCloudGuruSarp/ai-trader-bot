@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+import requests
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
@@ -21,10 +21,16 @@ if 'portfolio_values' not in st.session_state:
 
 # --- Fonksiyonlar ---
 def get_btc_price():
-    # Yahoo Finance'den canlı BTC fiyatı
-    btc = yf.Ticker("BTC-USD")
-    data = btc.history(period="1d", interval="1m")
-    return data['Close'].iloc[-1]
+    try:
+        # Binance Public API (Kimlik doğrulama gerektirmez, çok hızlıdır)
+        # Yahoo Finance (yfinance) yerine bunu kullanıyoruz çünkü Rate Limit yemez.
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        return float(data['price'])
+    except Exception as e:
+        st.error(f"Fiyat çekilemedi: {e}")
+        return 0.0
 
 def simulate_ai_decision(price):
     # BURASI YAPAY ZEKANIN SİMÜLASYONU
@@ -48,17 +54,25 @@ def simulate_ai_decision(price):
 st.title("🤖 AI Agent: 'Para Kazan ya da Öl' Simülasyonu")
 st.markdown("---")
 
+# Fiyatı en başta çekelim
+current_price = get_btc_price()
+
 # Yan Panel (Sidebar)
 with st.sidebar:
     st.header("Cüzdan Durumu")
-    current_price = get_btc_price()
-    total_value = st.session_state.balance + (st.session_state.btc_held * current_price)
+    
+    # Portföy Değeri Hesaplama
+    if current_price > 0:
+        total_value = st.session_state.balance + (st.session_state.btc_held * current_price)
+    else:
+        total_value = st.session_state.balance # Fiyat çekilemezse sadece nakiti göster
     
     delta = total_value - 100
     st.metric(label="Toplam Varlık", value=f"${total_value:.2f}", delta=f"{delta:.2f}$")
     
     st.write(f"💵 Nakit: ${st.session_state.balance:.2f}")
     st.write(f"🪙 BTC Miktar: {st.session_state.btc_held:.6f}")
+    st.write(f"📊 Güncel BTC: ${current_price:,.2f}")
     
     if st.button("AI Ajanını Tetikle (Trade Yap)"):
         with st.spinner('Piyasa taranıyor, haberler okunuyor...'):
@@ -109,10 +123,16 @@ with col1:
 with col2:
     st.subheader("📜 Son İşlemler & AI Günlüğü")
     for log in st.session_state.history:
-        color = "green" if log["Karar"] == "AL" else "red" if log["Karar"] == "SAT" else "gray"
+        if log["Karar"] == "AL":
+            color = "green"
+        elif log["Karar"] == "SAT":
+            color = "red"
+        else:
+            color = "gray"
+            
         st.markdown(f"**[{log['Zaman']}]** :{color}[{log['Karar']}] @ ${log['Fiyat']:.2f}")
         st.caption(f"_{log['Neden']}_")
         st.divider()
 
-# Otomatik yenileme için not
-st.caption("Not: Bu bir simülasyondur. Gerçek para kullanılmaz. Sayfayı yenilerseniz veriler sıfırlanır (Database yok).")
+# Alt Bilgi
+st.caption("Not: Veriler Binance API üzerinden canlı çekilmektedir. İşlemler simülasyondur.")
